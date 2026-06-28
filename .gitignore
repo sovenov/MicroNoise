@@ -6,5 +6,6 @@ dist/
 installer_output/
 .venv/
 venv/
+virtual_cables_setup/
 
 # MicroNoise.spec — это конфиг сборки, его держим в репозитории.
