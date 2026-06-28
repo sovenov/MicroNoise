@@ -28,14 +28,21 @@ class NoiseCleanApp:
                                   on_status=self._engine_status)
         self.toast = widgets.Toast(root, self.fonts)
 
-        # состояние
-        self.power_on = True
-        self.mode = config.MODE_LIGHT
-        self.gain_db = 0.0
-        self._alive = True
-
-        # сохранённые настройки (выбор устройств); пустой dict = первый запуск
+        # сохранённые настройки; пустой dict = первый запуск
         self._settings = settings.load()
+
+        # состояние (восстанавливается из настроек)
+        self.mode = self._settings.get("mode", config.MODE_LIGHT)
+        if self.mode not in (config.MODE_LIGHT, config.MODE_STRONG):
+            self.mode = config.MODE_LIGHT
+        try:
+            self.gain_db = float(self._settings.get("gain_db", 0.0))
+        except (TypeError, ValueError):
+            self.gain_db = 0.0
+        self.gain_db = max(config.GAIN_MIN_DB,
+                           min(config.GAIN_MAX_DB, self.gain_db))
+        self.power_on = bool(self._settings.get("power_on", True))
+        self._alive = True
 
         # язык интерфейса (ru/en), запоминается в настройках
         self.lang = self._settings.get("lang", i18n.DEFAULT_LANG)
@@ -43,6 +50,8 @@ class NoiseCleanApp:
             self.lang = i18n.DEFAULT_LANG
         # реестр виджетов для перевода: (виджет, ключ, верхний_регистр)
         self._tr_widgets = []
+        # id отложенного сохранения настроек (для ползунка усиления)
+        self._save_after_id = None
 
         # системный трей
         self._tray = None
@@ -230,6 +239,17 @@ class NoiseCleanApp:
 
     def _quit(self):
         self._alive = False
+        # сохранить текущее состояние перед выходом (на случай несохранённого gain)
+        try:
+            if self._save_after_id is not None:
+                self.root.after_cancel(self._save_after_id)
+                self._save_after_id = None
+        except Exception:
+            pass
+        try:
+            self._save_settings()
+        except Exception:
+            pass
         try:
             if self._single is not None:
                 self._single.stop()
@@ -375,8 +395,7 @@ class NoiseCleanApp:
         if lang == self.lang or lang not in i18n.LANGS:
             return
         self.lang = lang
-        self._settings["lang"] = lang
-        settings.save(self._settings)
+        self._save_settings()
         self._retranslate()
 
     def _on_lang_change(self, _event):
@@ -504,6 +523,10 @@ class NoiseCleanApp:
                                     fg=C["green"], font=self.fonts["value"])
         self.power_label.pack(pady=(6, 0))
 
+        # восстановить вид кнопки/подписи из сохранённого состояния
+        self.power_btn.set_state(self.power_on)
+        self._update_power_texts()
+
     def _build_footer(self, parent):
         footer = tk.Frame(parent, bg=C["bg"])
         footer.pack(side="bottom", fill="x", pady=(6, 0))
@@ -544,9 +567,10 @@ class NoiseCleanApp:
             self._t("mode_strong_desc"), command=self._select_mode)
         self.mode_strong.pack(fill="x")
 
-        self.mode_light.set_selected(True)
         self._mode_options = {config.MODE_LIGHT: self.mode_light,
                               config.MODE_STRONG: self.mode_strong}
+        for key, opt in self._mode_options.items():
+            opt.set_selected(key == self.mode)
 
     def _build_devices_card(self, parent):
         card = self._card(parent)
@@ -638,7 +662,7 @@ class NoiseCleanApp:
                      font=self.fonts["muted"]).pack(anchor="w", pady=(2, 0))
         val_row = tk.Frame(card, bg=C["panel"])
         val_row.pack(fill="x", padx=20, pady=(12, 4))
-        self.gain_val = tk.Label(val_row, text=self._fmt_gain(0.0),
+        self.gain_val = tk.Label(val_row, text=self._fmt_gain(self.gain_db),
                                  bg=C["panel"], fg=C["green"],
                                  font=self.fonts["value"])
         self.gain_val.pack(side="left")
@@ -659,6 +683,7 @@ class NoiseCleanApp:
             slider_row, bg=C["panel"], minimum=config.GAIN_MIN_DB,
             maximum=config.GAIN_MAX_DB, step=0.5, command=self._on_gain)
         self.gain_slider.pack(side="left", fill="x", expand=True, padx=10)
+        self.gain_slider.set(self.gain_db)  # восстановить положение из настроек
 
     # ------------------------------------------------------------------ devices
     def _load_devices(self):
@@ -696,9 +721,27 @@ class NoiseCleanApp:
         return None
 
     def _save_settings(self):
+        # запоминаем весь пользовательский выбор, чтобы восстановить при старте
         self._settings["input_name"] = devmod.device_name(self.input_idx)
         self._settings["output_name"] = devmod.device_name(self.output_idx)
+        self._settings["mode"] = self.mode
+        self._settings["gain_db"] = round(float(self.gain_db), 2)
+        self._settings["power_on"] = bool(self.power_on)
+        self._settings["lang"] = self.lang
         settings.save(self._settings)
+
+    def _schedule_save(self):
+        """Отложенное сохранение (для частых событий — перетаскивания ползунка)."""
+        if self._save_after_id is not None:
+            try:
+                self.root.after_cancel(self._save_after_id)
+            except Exception:
+                pass
+        self._save_after_id = self.root.after(600, self._do_scheduled_save)
+
+    def _do_scheduled_save(self):
+        self._save_after_id = None
+        self._save_settings()
 
     def _select_combo(self, combo, devs, target_index):
         for pos, dev in enumerate(devs):
@@ -738,6 +781,7 @@ class NoiseCleanApp:
                 self._tray.update_menu()
             except Exception:
                 pass
+        self._save_settings()
 
     def _select_mode(self, option):
         mode = config.MODE_LIGHT if option is self.mode_light else config.MODE_STRONG
@@ -747,6 +791,7 @@ class NoiseCleanApp:
         for key, opt in self._mode_options.items():
             opt.set_selected(key == mode)
         self.engine.set_mode(mode)
+        self._save_settings()
 
     def _on_input_change(self, _event):
         pos = self.input_combo.current()
@@ -766,6 +811,7 @@ class NoiseCleanApp:
         self.gain_db = value
         self.gain_val.config(text=self._fmt_gain(value))
         self.engine.set_gain_db(value)
+        self._schedule_save()
 
     def _reset_gain(self):
         self.gain_slider.set(0.0, notify=True)

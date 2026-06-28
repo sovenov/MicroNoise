@@ -22,7 +22,8 @@ PATH = _path()
 
 def load():
     try:
-        with open(PATH, "r", encoding="utf-8") as f:
+        # utf-8-sig — на случай, если файл сохранён с BOM (например из Блокнота)
+        with open(PATH, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except Exception:
