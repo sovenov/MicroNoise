@@ -1,6 +1,6 @@
 # MicroNoise
 
-Скачать .exe установщик здесь и zip portable версию можно здесь -> https://github.com/sovenov/MicroNoise/releases
+Скачать .exe установщик и zip portable версию можно здесь: https://github.com/sovenov/MicroNoise/releases
 
 Шумоподавление микрофона в реальном времени с выводом обработанного голоса в
 **виртуальный микрофон**. Десктоп-приложение на Python 3.8 + tkinter/ttk,
