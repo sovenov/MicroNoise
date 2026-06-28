@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+build/
+dist/
+.venv/
+venv/
+
+# MicroNoise.spec — это конфиг сборки, его держим в репозитории.
