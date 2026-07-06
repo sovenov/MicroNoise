@@ -52,7 +52,15 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # numpy больше не используется (DSP на stdlib array+ctypes). Исключаем его
+    # и его BLAS (libopenblas ~35 МБ) — иначе PyInstaller подтянет их
+    # транзитивно через ленивый `import numpy` внутри sounddevice.
+    #
+    # OpenSSL тоже не нужен: приложение не ходит в сеть/TLS (webbrowser
+    # открывает ссылку через ОС, ssl не импортирует). Исключаем ssl/_ssl
+    # (libssl-1_1.dll, _ssl.pyd) и _hashlib (libcrypto-1_1.dll ~3.3 МБ);
+    # hashlib при этом работает через встроенные _sha*-модули.
+    excludes=['numpy', 'ssl', '_ssl', '_hashlib'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

@@ -12,10 +12,26 @@
 import collections
 import ctypes
 import os
-
-import numpy as np
+from array import array
 
 from . import config
+
+
+def _zeros_f32(n):
+    """Массив float32 из n нулей (эквивалент np.zeros(n, float32))."""
+    return array("f", bytes(4 * n))
+
+
+def _float_ptr(buf):
+    """ctypes-указатель POINTER(c_float) на память array('f') buf (без копии)."""
+    carr = (ctypes.c_float * len(buf)).from_buffer(buf)
+    return ctypes.cast(carr, ctypes.POINTER(ctypes.c_float)), carr
+
+
+def _int16_ptr(buf):
+    """ctypes-указатель POINTER(c_int16) на память array('h') buf (без копии)."""
+    carr = (ctypes.c_int16 * len(buf)).from_buffer(buf)
+    return ctypes.cast(carr, ctypes.POINTER(ctypes.c_int16)), carr
 
 
 class SuppressorError(Exception):
@@ -93,9 +109,6 @@ class RNNoiseSuppressor(BaseSuppressor):
         self._state = lib.rnnoise_create(None)
         if not self._state:
             raise SuppressorError("rnnoise_create вернул NULL")
-        # рабочий буфер в int16-масштабе, как требует RNNoise
-        self._buf = np.zeros(self._frame_size, dtype=np.float32)
-        self._zeros = np.zeros(self._frame_size, dtype=np.float32)
 
         # параметры VAD-гейта
         self._threshold = (config.RNNOISE_VAD_THRESHOLD
@@ -131,13 +144,13 @@ class RNNoiseSuppressor(BaseSuppressor):
 
     def process(self, frame):
         fs = self._frame_size
-        buf = self._buf
-        if len(frame) == fs:
-            np.multiply(frame, 32767.0, out=buf)
-        else:
-            buf = np.zeros(fs, dtype=np.float32)
-            buf[:len(frame)] = frame[:fs] * 32767.0
-        ptr = buf.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        # рабочий буфер в int16-масштабе, как требует RNNoise
+        buf = array("f", frame[:fs]) if len(frame) >= fs else array("f", frame)
+        for i in range(len(buf)):
+            buf[i] *= 32767.0
+        if len(buf) < fs:                       # добить нулями до кадра
+            buf.extend(bytes(4 * (fs - len(buf))))
+        ptr, _keep = _float_ptr(buf)            # _keep держит буфер живым
         prob = float(self._lib.rnnoise_process_frame(self._state, ptr, ptr))
 
         idx = self._idx
@@ -152,7 +165,7 @@ class RNNoiseSuppressor(BaseSuppressor):
         else:
             state = self._MUTED
 
-        self._queue.append([idx, buf.copy(), prob, state])
+        self._queue.append([idx, buf, prob, state])
 
         # ретроактивный grace: открыть недавние заглушённые блоки перед речью
         if retro > 0 and prob >= thr:
@@ -166,11 +179,13 @@ class RNNoiseSuppressor(BaseSuppressor):
         if len(self._queue) > retro:
             _, out_frames, out_prob, out_state = self._queue.popleft()
             if out_state == self._MUTED:
-                return self._zeros.copy(), 0.0
-            np.multiply(out_frames, 1.0 / 32767.0, out=out_frames)
-            np.clip(out_frames, -1.0, 1.0, out=out_frames)
+                return _zeros_f32(fs), 0.0
+            inv = 1.0 / 32767.0
+            for i in range(len(out_frames)):
+                v = out_frames[i] * inv
+                out_frames[i] = 1.0 if v > 1.0 else (-1.0 if v < -1.0 else v)
             return out_frames, out_prob
-        return self._zeros.copy(), 0.0
+        return _zeros_f32(fs), 0.0
 
     def close(self):
         if getattr(self, "_state", None):
@@ -234,10 +249,20 @@ class SpeexSuppressor(BaseSuppressor):
 
     def process(self, frame):
         n = len(frame)
-        pcm = np.clip(frame * 32768.0, -32768, 32767).astype(np.int16)
-        ptr = pcm.ctypes.data_as(ctypes.POINTER(ctypes.c_int16))
+        pcm = array("h", bytes(2 * n))          # int16, n нулей
+        for i in range(n):
+            v = frame[i] * 32768.0
+            if v > 32767.0:
+                v = 32767.0
+            elif v < -32768.0:
+                v = -32768.0
+            pcm[i] = int(v)                     # усечение к нулю, как astype(int16)
+        ptr, _keep = _int16_ptr(pcm)            # _keep держит буфер живым
         vad = self._lib.speex_preprocess_run(self._state, ptr)
-        out = (pcm.astype(np.float32) * (1.0 / 32768.0))[:n]
+        inv = 1.0 / 32768.0
+        out = array("f", bytes(4 * n))
+        for i in range(n):
+            out[i] = pcm[i] * inv
         return out, float(vad)
 
     def close(self):

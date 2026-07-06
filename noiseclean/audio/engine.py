@@ -15,8 +15,8 @@ import math
 import os
 import threading
 import wave
+from array import array
 
-import numpy as np
 import sounddevice as sd
 
 from .. import config
@@ -31,9 +31,13 @@ _SILENCE_PROBE_SEC = 0.4
 
 def _level_percent(samples):
     """RMS сигнала -> уровень 0..100 % (диапазон -60..0 dBFS)."""
-    if samples.size == 0:
+    n = len(samples)
+    if n == 0:
         return 0.0
-    rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+    acc = 0.0
+    for v in samples:
+        acc += v * v
+    rms = math.sqrt(acc / n)
     if rms <= 1e-7:
         return 0.0
     dbfs = 20.0 * math.log10(rms)
@@ -41,10 +45,33 @@ def _level_percent(samples):
     return max(0.0, min(100.0, pct))
 
 
+def _peak_abs(samples):
+    """Максимум |x| по кадру (эквивалент float(np.max(np.abs(x))))."""
+    peak = 0.0
+    for v in samples:
+        a = -v if v < 0.0 else v
+        if a > peak:
+            peak = a
+    return peak
+
+
 def _to_channels(mono, channels):
+    """mono array('f') -> чередующийся (interleaved) буфер на channels каналов."""
     if channels == 1:
-        return mono.reshape(-1, 1)
-    return np.repeat(mono.reshape(-1, 1), channels, axis=1)
+        return mono
+    out = array("f", bytes(4 * len(mono) * channels))
+    for c in range(channels):
+        out[c::channels] = mono
+    return out
+
+
+def _mono_from_raw(raw, channels):
+    """Сырой interleaved-буфер float32 (из RawInputStream.read) -> моно array('f')."""
+    full = array("f")
+    full.frombytes(bytes(raw))
+    if channels == 1:
+        return full
+    return full[0::channels]
 
 
 class _LinResampler:
@@ -62,30 +89,32 @@ class _LinResampler:
         self._prev = None    # последний сэмпл предыдущего блока (для стыковки)
 
     def process(self, x):
-        x = np.asarray(x, dtype=np.float32)
-        if x.size == 0:
-            return x
+        if len(x) == 0:
+            return array("f")
         if self._prev is None:
             self._prev = x[0]
-        buf = np.empty(x.size + 1, dtype=np.float32)
-        buf[0] = self._prev
-        buf[1:] = x
-        last = buf.size - 1
-        if self._pos > last:
-            self._pos -= last
+        buf = array("f", [self._prev])
+        buf.extend(x)                       # [prev, x0, x1, ...]
+        last = len(buf) - 1
+        step = self._step
+        pos = self._pos
+        if pos > last:
+            self._pos = pos - last
             self._prev = buf[last]
-            return np.zeros(0, dtype=np.float32)
-        n = int(math.floor((last - self._pos) / self._step)) + 1
+            return array("f")
+        n = int(math.floor((last - pos) / step)) + 1
         if n < 1:
-            self._pos -= last
+            self._pos = pos - last
             self._prev = buf[last]
-            return np.zeros(0, dtype=np.float32)
-        idx = self._pos + np.arange(n, dtype=np.float64) * self._step
-        i0 = np.floor(idx).astype(np.int64)
-        frac = (idx - i0).astype(np.float32)
-        i1 = np.minimum(i0 + 1, last)
-        out = (buf[i0] * (1.0 - frac) + buf[i1] * frac).astype(np.float32)
-        self._pos = (self._pos + n * self._step) - last
+            return array("f")
+        out = array("f", bytes(4 * n))
+        for k in range(n):
+            idx = pos + k * step            # pos>=0, step>0 -> idx>=0
+            i0 = int(idx)                   # floor для неотрицательных
+            frac = idx - i0
+            i1 = i0 + 1 if i0 + 1 <= last else last
+            out[k] = buf[i0] * (1.0 - frac) + buf[i1] * frac
+        self._pos = (pos + n * step) - last
         self._prev = buf[last]
         return out
 
@@ -99,17 +128,18 @@ class _MonitorRing:
         self._lock = threading.Lock()
 
     def push(self, mono):
-        buf = _to_channels(mono, self.channels).astype(np.float32)
+        buf = _to_channels(mono, self.channels)     # interleaved array('f')
         with self._lock:
             self._q.append(buf)
 
     def callback(self, outdata, frames, time_info, status):  # noqa: D401
+        # RawOutputStream: outdata — сырой байтовый буфер (frames*channels*4).
         with self._lock:
             buf = self._q.popleft() if self._q else None
-        if buf is None or len(buf) != frames:
-            outdata.fill(0.0)
+        if buf is None or len(buf) != frames * self.channels:
+            outdata[:] = b"\x00" * len(outdata)
         else:
-            outdata[:] = buf
+            outdata[:] = buf.tobytes()
 
 
 class AudioEngine:
@@ -153,7 +183,7 @@ class AudioEngine:
         self._in_block = config.FRAME_SIZE
         self._rs_in = None      # ресемплер вход.частота -> 48 кГц
         self._rs_out = None     # ресемплер 48 кГц -> вых.частота
-        self._proc_buf = np.zeros(0, dtype=np.float32)  # накопитель кадров 48 кГц
+        self._proc_buf = array("f")  # накопитель кадров 48 кГц (float32, моно)
         self._in_attempts = []  # список вариантов открытия входа
         self._in_pos = 0        # текущий выбранный вариант
 
@@ -172,6 +202,7 @@ class AudioEngine:
 
         # воспроизведение тестовой записи
         self._play_thread = None
+        self._play_stop = threading.Event()
 
     # ------------------------------------------------------------------ config
     def configure(self, input_idx=None, output_idx=None, monitor_idx=None,
@@ -428,7 +459,7 @@ class AudioEngine:
             chans = (1, max_ch) if max_ch > 1 else (1,)
             for ch in chans:
                 try:
-                    st = sd.InputStream(samplerate=sr, blocksize=block, device=dev,
+                    st = sd.RawInputStream(samplerate=sr, blocksize=block, device=dev,
                                         channels=ch, dtype="float32",
                                         extra_settings=extra)
                     return st, sr, ch, pos
@@ -467,7 +498,7 @@ class AudioEngine:
         self._in_block = max(1, int(round(self._in_sr / 100.0)))
         self._rs_in = (_LinResampler(self._in_sr, config.SAMPLE_RATE)
                        if self._in_sr != config.SAMPLE_RATE else None)
-        self._proc_buf = np.zeros(0, dtype=np.float32)
+        self._proc_buf = array("f")
         try:
             self._in.start()
         except Exception as exc:
@@ -484,7 +515,7 @@ class AudioEngine:
             except Exception:
                 ch = 2
             try:
-                st = sd.OutputStream(samplerate=sr, blocksize=0, device=dev,
+                st = sd.RawOutputStream(samplerate=sr, blocksize=0, device=dev,
                                      channels=ch, dtype="float32",
                                      extra_settings=extra)
                 return st, sr, ch
@@ -518,7 +549,7 @@ class AudioEngine:
                        if self._in_sr != proc_sr else None)
         self._rs_out = (_LinResampler(proc_sr, self._out_sr)
                         if self._out_sr != proc_sr else None)
-        self._proc_buf = np.zeros(0, dtype=np.float32)
+        self._proc_buf = array("f")
 
         self._in.start()
         self._out.start()
@@ -531,7 +562,7 @@ class AudioEngine:
                 mon_info = sd.query_devices(self._monitor_idx)
                 mch = min(2, max(1, int(mon_info["max_output_channels"])))
                 self._mon_ring = _MonitorRing(mch)
-                self._mon = sd.OutputStream(samplerate=proc_sr, blocksize=fs,
+                self._mon = sd.RawOutputStream(samplerate=proc_sr, blocksize=fs,
                                             device=self._monitor_idx, channels=mch,
                                             dtype="float32",
                                             callback=self._mon_ring.callback)
@@ -578,15 +609,15 @@ class AudioEngine:
                     self._notify_error("Ошибка чтения с микрофона: %s" % exc)
                     break
 
-                mono = np.ascontiguousarray(data[:, 0], dtype=np.float32)
+                mono = _mono_from_raw(data, self._in_channels)
                 in_level = _level_percent(mono)
 
                 if probe_active:
-                    if mono.size:
-                        amp = float(np.max(np.abs(mono)))
+                    if len(mono):
+                        amp = _peak_abs(mono)
                         if amp > probe_amp:
                             probe_amp = amp
-                    probe_samples += mono.size
+                    probe_samples += len(mono)
                     if probe_amp > 1e-5:
                         probe_active = False
                         self._log("input audio OK (peak_amp=%.6f) on %s"
@@ -612,42 +643,56 @@ class AudioEngine:
 
                 # к частоте обработки (48 кГц) и накопление до кадров по 480
                 sig = self._rs_in.process(mono) if self._rs_in is not None else mono
-                if self._proc_buf.size:
-                    self._proc_buf = np.concatenate((self._proc_buf, sig))
-                else:
-                    self._proc_buf = np.ascontiguousarray(sig)
+                self._proc_buf.extend(sig)
 
                 out_parts = []
                 out_level = self._out_level
                 last_prob = self._speech
-                while self._proc_buf.size >= fs:
-                    frame = np.ascontiguousarray(self._proc_buf[:fs])
-                    self._proc_buf = self._proc_buf[fs:]
+                while len(self._proc_buf) >= fs:
+                    frame = self._proc_buf[:fs]       # array('f') копия кадра
+                    del self._proc_buf[:fs]
                     try:
                         out, prob = supp.process(frame)
                     except Exception:
-                        out, prob = frame.copy(), 0.0
+                        out, prob = array("f", frame), 0.0
                     if gain != 1.0:
-                        out = out * gain
-                    np.clip(out, -1.0, 1.0, out=out)
+                        for i in range(len(out)):
+                            out[i] *= gain
+                    for i in range(len(out)):         # клип в [-1, 1]
+                        v = out[i]
+                        if v > 1.0:
+                            out[i] = 1.0
+                        elif v < -1.0:
+                            out[i] = -1.0
                     out_level = _level_percent(out)
                     last_prob = prob
                     out_parts.append(out)
 
                     if monitor_on and self._mon_ring is not None:
-                        self._mon_ring.push(out * config.MONITOR_VOLUME)
+                        mon = array("f", out)
+                        vol = config.MONITOR_VOLUME
+                        for i in range(len(mon)):
+                            mon[i] *= vol
+                        self._mon_ring.push(mon)
                     if self._rec_active:
-                        self._rec_frames.append((out * 32767.0).astype(np.int16))
+                        rec = array("h", bytes(2 * len(out)))
+                        for i in range(len(out)):
+                            rec[i] = int(out[i] * 32767.0)
+                        self._rec_frames.append(rec)
                         self._rec_count += len(out)
                         if self._rec_count >= self._rec_target:
                             self._finalize_recording()
 
                 if out_parts:
-                    proc_out = (out_parts[0] if len(out_parts) == 1
-                                else np.concatenate(out_parts))
+                    if len(out_parts) == 1:
+                        proc_out = out_parts[0]
+                    else:
+                        proc_out = array("f", out_parts[0])
+                        for p in out_parts[1:]:
+                            proc_out.extend(p)
                     snd = (self._rs_out.process(proc_out)
                            if self._rs_out is not None else proc_out)
-                    if snd.size:
+                    if len(snd):
                         try:
                             self._out.write(_to_channels(snd, self._out_channels))
                         except sd.PortAudioError as exc:
@@ -697,9 +742,12 @@ class AudioEngine:
         frames = self._rec_frames
         self._rec_frames = []
         if frames:
-            self._recording = np.concatenate(frames)
+            rec = array("h")
+            for f in frames:
+                rec.extend(f)
+            self._recording = rec
         else:
-            self._recording = np.zeros(0, dtype=np.int16)
+            self._recording = array("h")
         cb = self._rec_done_cb
         self._rec_done_cb = None
         if cb is not None:
@@ -726,14 +774,31 @@ class AudioEngine:
         if not self.has_recording():
             return False
         dev = device if device is not None else self._monitor_idx
-        data = self._recording.astype(np.float32) / 32768.0
+        raw = self._recording.tobytes()          # int16 моно, 48 кГц
+        self._play_stop.clear()
 
         def _run():
+            stream = None
             try:
-                sd.play(data, config.SAMPLE_RATE, device=dev)
-                sd.wait()
+                stream = sd.RawOutputStream(samplerate=config.SAMPLE_RATE,
+                                            device=dev, channels=1,
+                                            dtype="int16")
+                stream.start()
+                # пишем чанками (~200 мс), чтобы stop_playback мог прервать
+                chunk = config.FRAME_SIZE * 20 * 2   # 20 кадров * int16
+                for off in range(0, len(raw), chunk):
+                    if self._play_stop.is_set():
+                        break
+                    stream.write(raw[off:off + chunk])
             except Exception:
                 pass
+            finally:
+                if stream is not None:
+                    try:
+                        stream.stop()
+                        stream.close()
+                    except Exception:
+                        pass
             if on_done is not None:
                 on_done()
 
@@ -742,10 +807,7 @@ class AudioEngine:
         return True
 
     def stop_playback(self):
-        try:
-            sd.stop()
-        except Exception:
-            pass
+        self._play_stop.set()
 
     # ---------------------------------------------------------------- helpers
     def _log(self, msg):
