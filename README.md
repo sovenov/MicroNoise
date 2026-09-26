@@ -8,6 +8,11 @@
 **виртуальный микрофон**.
 Работает в том числе на Windows 7 и VirtualBox / VMware.
 
+
+![MicroNoise UI](screenshot_for_github/micronoise_ui.png)
+
+
+
 Два режима подавления шума:
 
 | Режим | Движок | Описание |
