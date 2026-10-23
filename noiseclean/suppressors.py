@@ -14,7 +14,7 @@ import ctypes
 import os
 from array import array
 
-from . import config
+from . import config, dsp
 
 
 def _zeros_f32(n):
@@ -145,9 +145,8 @@ class RNNoiseSuppressor(BaseSuppressor):
     def process(self, frame):
         fs = self._frame_size
         # рабочий буфер в int16-масштабе, как требует RNNoise
-        buf = array("f", frame[:fs]) if len(frame) >= fs else array("f", frame)
-        for i in range(len(buf)):
-            buf[i] *= 32767.0
+        buf = array("f", frame if len(frame) <= fs else frame[:fs])
+        dsp.scale_in_place(buf, 32767.0)
         if len(buf) < fs:                       # добить нулями до кадра
             buf.extend(bytes(4 * (fs - len(buf))))
         ptr, _keep = _float_ptr(buf)            # _keep держит буфер живым
@@ -180,10 +179,7 @@ class RNNoiseSuppressor(BaseSuppressor):
             _, out_frames, out_prob, out_state = self._queue.popleft()
             if out_state == self._MUTED:
                 return _zeros_f32(fs), 0.0
-            inv = 1.0 / 32767.0
-            for i in range(len(out_frames)):
-                v = out_frames[i] * inv
-                out_frames[i] = 1.0 if v > 1.0 else (-1.0 if v < -1.0 else v)
+            dsp.scale_clip_in_place(out_frames, 1.0 / 32767.0)
             return out_frames, out_prob
         return _zeros_f32(fs), 0.0
 
@@ -248,21 +244,10 @@ class SpeexSuppressor(BaseSuppressor):
         self._set_int(_SPEEX_SET_NOISE_SUPPRESS, int(suppress_db))
 
     def process(self, frame):
-        n = len(frame)
-        pcm = array("h", bytes(2 * n))          # int16, n нулей
-        for i in range(n):
-            v = frame[i] * 32768.0
-            if v > 32767.0:
-                v = 32767.0
-            elif v < -32768.0:
-                v = -32768.0
-            pcm[i] = int(v)                     # усечение к нулю, как astype(int16)
+        pcm = dsp.to_pcm16(frame)
         ptr, _keep = _int16_ptr(pcm)            # _keep держит буфер живым
         vad = self._lib.speex_preprocess_run(self._state, ptr)
-        inv = 1.0 / 32768.0
-        out = array("f", bytes(4 * n))
-        for i in range(n):
-            out[i] = pcm[i] * inv
+        out = dsp.from_pcm16(pcm)
         return out, float(vad)
 
     def close(self):

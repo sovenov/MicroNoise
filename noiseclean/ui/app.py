@@ -1,17 +1,30 @@
 """Главное окно MicroNoise: компоновка интерфейса и связь с движком."""
 
+import math
 import os
 import queue
 import sys
 import tkinter as tk
+import time
 from tkinter import ttk
 
 from .. import config, i18n, settings
 from ..audio import devices as devmod
 from ..audio.engine import AudioEngine
+from ..audio.volume import resolve_endpoint, list_virtual_capture_endpoints
+from ..volume_lock import VolumeKeeper, normalize_settings
 from . import assets, theme, widgets
+from .volume_dialog import VolumeLockDialog
 
 C = config.COLORS
+
+
+def _smooth_level(current, target, elapsed):
+    """Сглаживание по времени, с быстрым подъёмом и спокойным спадом."""
+    tau = (config.UI_METER_ATTACK_MS if target > current
+           else config.UI_METER_RELEASE_MS) / 1000.0
+    value = current + (target - current) * (-math.expm1(-elapsed / tau))
+    return target if abs(target - value) < 0.1 else value
 
 
 class NoiseCleanApp:
@@ -56,10 +69,20 @@ class NoiseCleanApp:
         # системный трей
         self._tray = None
         self._tray_q = queue.Queue()
+        self._volume_options = normalize_settings(self._settings.get('volume_lock'))
+        self._volume_status = {'state': 'off'}
+        self._volume_dialog = None
+        self._volume_keeper = VolumeKeeper(
+            on_status=lambda status: self._tray_q.put(('volume_lock', status)))
 
         # сглаженные значения индикаторов (только для отображения)
         self._disp_in = 0.0
         self._disp_out = 0.0
+        self._meters_active = False
+        self.engine.set_metering_enabled(False)
+        self._meter_updated_at = time.monotonic()
+        self._in_text = self._out_text = None
+        self._tick_after_id = None
 
         self.input_devs = []
         self.output_devs = []
@@ -67,6 +90,7 @@ class NoiseCleanApp:
         self._setup_window()
         self._build_ui()
         self._load_devices()
+        self._sync_volume_lock()
         self._apply_engine_config()
         self._build_tray()
 
@@ -76,7 +100,7 @@ class NoiseCleanApp:
             self._single.start_listener(lambda: self._tray_q.put("open"))
 
         self.root.after(120, self._post_show)
-        self.root.after(33, self._tick)
+        self._tick_after_id = self.root.after(config.UI_TICK_MS, self._tick)
 
         # тестовый хук: сменить язык на лету (как клик по переключателю)
         _tl = os.environ.get("NC_TEST_LANG")
@@ -225,20 +249,28 @@ class NoiseCleanApp:
                 import ctypes
                 hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
                 ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+                self._set_meters_active(False)
                 return
             except Exception:
                 pass
         self.root.iconify()
+        self._set_meters_active(False)
 
     def _on_close(self):
         # Крестик сворачивает в трей; полный выход — через меню трея «Завершить».
         if self._tray is not None:
             self.root.withdraw()
+            self._set_meters_active(False)
         else:
             self._quit()
 
     def _quit(self):
         self._alive = False
+        self._volume_keeper.close()
+        self._set_meters_active(False)
+        if self._tick_after_id is not None:
+            self.root.after_cancel(self._tick_after_id)
+            self._tick_after_id = None
         # сохранить текущее состояние перед выходом (на случай несохранённого gain)
         try:
             if self._save_after_id is not None:
@@ -290,6 +322,32 @@ class NoiseCleanApp:
         except Exception:
             pass
 
+    def _window_is_visible(self):
+        if self.root.state() in ("withdrawn", "iconic"):
+            return False
+        if not self.root.winfo_ismapped():
+            return False
+        if sys.platform == "win32":
+            # У безрамочного окна ShowWindow(SW_MINIMIZE) не всегда меняет
+            # Tk state(): дополнительно проверяем нативное окно Windows.
+            import ctypes
+            u32 = ctypes.windll.user32
+            get_parent = u32.GetAncestor
+            get_parent.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            get_parent.restype = ctypes.c_void_p
+            hwnd = get_parent(self.root.winfo_id(), 2)  # GA_ROOT
+            if hwnd and u32.IsIconic(ctypes.c_void_p(hwnd)):
+                return False
+        return True
+
+    def _set_meters_active(self, active):
+        if active == self._meters_active:
+            return
+        self._meters_active = active
+        self.engine.set_metering_enabled(active)
+        self._disp_in = self._disp_out = 0.0
+        self._meter_updated_at = time.monotonic()
+
     # ---------------------------------------------------------------- tray
     def _build_tray(self):
         try:
@@ -333,7 +391,9 @@ class NoiseCleanApp:
         try:
             while True:
                 action = self._tray_q.get_nowait()
-                if action == "open":
+                if isinstance(action, tuple) and action[0] == 'volume_lock':
+                    self._set_volume_status(action[1])
+                elif action == "open":
                     self._show_window()
                 elif action == "on":
                     self._set_power(True)
@@ -530,6 +590,11 @@ class NoiseCleanApp:
     def _build_footer(self, parent):
         footer = tk.Frame(parent, bg=C["bg"])
         footer.pack(side="bottom", fill="x", pady=(6, 0))
+        self.volume_button = widgets.make_button(
+            footer, self._t('volume_lock_button'), self._open_volume_settings,
+            bg=C['panel_soft'], font=self.fonts['muted'], pad=(10, 3))
+        self.volume_button.pack(side='left')
+        self._tr_widgets.append((self.volume_button, 'volume_lock_button', False))
 
         # Переключатель языка — маленький выпадающий список в самом правом углу.
         self._lang_values = [("ru", "RU"), ("en", "EN")]
@@ -728,6 +793,7 @@ class NoiseCleanApp:
         self._settings["gain_db"] = round(float(self.gain_db), 2)
         self._settings["power_on"] = bool(self.power_on)
         self._settings["lang"] = self.lang
+        self._settings['volume_lock'] = dict(self._volume_options)
         settings.save(self._settings)
 
     def _schedule_save(self):
@@ -798,6 +864,7 @@ class NoiseCleanApp:
         if 0 <= pos < len(self.input_devs):
             self.input_idx = self.input_devs[pos]["index"]
             self.engine.set_input_device(self.input_idx)
+            self._sync_volume_lock()
             self._save_settings()
 
     def _on_output_change(self, _event):
@@ -805,6 +872,7 @@ class NoiseCleanApp:
         if 0 <= pos < len(self.output_devs):
             self.output_idx = self.output_devs[pos]["index"]
             self.engine.set_output_device(self.output_idx)
+            self._sync_volume_lock()
             self._save_settings()
 
     def _on_gain(self, value):
@@ -815,6 +883,65 @@ class NoiseCleanApp:
 
     def _reset_gain(self):
         self.gain_slider.set(0.0, notify=True)
+
+    # --------------------------------------------------------- system volumes
+    def _volume_targets(self, options):
+        targets = []
+        if options['enabled']:
+            for flow, index in [('input', self.input_idx), ('output', self.output_idx)]:
+                if options[flow + '_enabled']:
+                    targets.append((resolve_endpoint(index, flow), options[flow + '_level']))
+            seen = {endpoint for endpoint, _level in targets}
+            for device in options['extra_inputs']:
+                endpoint = device['endpoint_id']
+                if device['enabled'] and endpoint not in seen:
+                    targets.append((endpoint, device['level']))
+                    seen.add(endpoint)
+        return targets
+
+    def _sync_volume_lock(self):
+        try:
+            targets = self._volume_targets(self._volume_options)
+        except Exception as exc:
+            self._volume_keeper.configure([], self._volume_options['interval_seconds'])
+            self._tray_q.put(('volume_lock', {'state': 'error', 'message': str(exc)}))
+            return
+        self._volume_keeper.configure(targets, self._volume_options['interval_seconds'])
+
+    def _apply_volume_options(self, options):
+        options = normalize_settings(options)
+        targets = self._volume_targets(options)
+        self._volume_options = options
+        self._volume_keeper.configure(targets, options['interval_seconds'])
+        self._save_settings()
+        self._set_volume_status({'state': 'on' if targets else 'off'})
+
+    def _set_volume_status(self, status):
+        self._volume_status = status
+        self.volume_button.config(fg=C['green'] if status['state'] == 'on'
+                                  else C['danger'] if status['state'] == 'error' else C['text'])
+        dialog = self._volume_dialog
+        if dialog is not None and dialog.window.winfo_exists():
+            dialog.set_status(status, self._volume_options['interval_seconds'])
+
+    def _open_volume_settings(self):
+        if self._volume_dialog is not None and self._volume_dialog.window.winfo_exists():
+            self._volume_dialog.window.lift()
+            return
+        try:
+            extra_devices = list_virtual_capture_endpoints()
+            discovery_error = None
+        except Exception as exc:
+            extra_devices = []
+            discovery_error = str(exc)
+        self._volume_dialog = VolumeLockDialog(
+            self.root, self.fonts, self.lang, self._volume_options,
+            (devmod.device_name(self.input_idx), devmod.device_name(self.output_idx)),
+            self._apply_volume_options, extra_devices=extra_devices)
+        if discovery_error:
+            self._volume_dialog.error.config(text=self._t('volume_lock_discovery_error'))
+        self._volume_dialog.set_status(self._volume_status,
+                                       self._volume_options['interval_seconds'])
 
     # ------------------------------------------------------------------ engine cb
     def _engine_error(self, message):
@@ -828,22 +955,34 @@ class NoiseCleanApp:
 
     # ------------------------------------------------------------------ tick
     def _tick(self):
+        self._tick_after_id = None
         self._drain_tray()
         if not self._alive:
             return
         try:
-            il, ol, _sp = self.engine.get_levels()
-            if not self.power_on:
-                il = ol = 0.0
-            # экспоненциальное сглаживание — плавное движение полосок
-            a = config.UI_METER_SMOOTHING
-            self._disp_in += (il - self._disp_in) * a
-            self._disp_out += (ol - self._disp_out) * a
-            self.in_meter.set_value(self._disp_in)
-            self.out_meter.set_value(self._disp_out)
-            self.in_val.config(text="%d%%" % round(self._disp_in))
-            self.out_val.config(text="%d%%" % round(self._disp_out))
+            self._set_meters_active(self._window_is_visible())
+            if self._meters_active:
+                now = time.monotonic()
+                elapsed = max(0.0, now - self._meter_updated_at)
+                self._meter_updated_at = now
+                il, ol, _sp = self.engine.get_levels()
+                if not self.power_on:
+                    il = ol = 0.0
+                self._disp_in = _smooth_level(self._disp_in, il, elapsed)
+                self._disp_out = _smooth_level(self._disp_out, ol, elapsed)
+                self.in_meter.set_value(self._disp_in)
+                self.out_meter.set_value(self._disp_out)
+                in_text = "%d%%" % round(self._disp_in)
+                out_text = "%d%%" % round(self._disp_out)
+                if in_text != self._in_text:
+                    self.in_val.config(text=in_text)
+                    self._in_text = in_text
+                if out_text != self._out_text:
+                    self.out_val.config(text=out_text)
+                    self._out_text = out_text
         except Exception:
             pass
         if self._alive:
-            self.root.after(config.UI_TICK_MS, self._tick)
+            interval = (config.UI_TICK_MS if self._meters_active
+                        else config.UI_HIDDEN_TICK_MS)
+            self._tick_after_id = self.root.after(interval, self._tick)

@@ -1,0 +1,120 @@
+{
+  "python": "3.8.10",
+  "audio_seconds_per_run": 30.0,
+  "repeats": 3,
+  "baseline_sources_sha256": {
+    "engine.py": "855508407efc11af3619ecb5ace3818df20d048416fa720fa2bd450ebdd7800c",
+    "suppressors.py": "01e3d684972dbf16298974048971254a2d2db3b60f2aaa5b13a617bf6e8c63ce"
+  },
+  "native_dll_bytes": 5632,
+  "results": {
+    "48k_visible/light": {
+      "before_cpu_seconds": 0.546875,
+      "after_cpu_seconds": 0.171875,
+      "reduction_percent": 68.6,
+      "audio_sha256": "7d36ac3eee7be115e1454e542fc5404f80297feae75ee700d6c436b668b203bd",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "48k_visible/strong": {
+      "before_cpu_seconds": 0.890625,
+      "after_cpu_seconds": 0.5625,
+      "reduction_percent": 36.8,
+      "audio_sha256": "0d9a6403a4657930123c040f4de1546e673ccf17bd255b4cf685a2de9d18de45",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "48k_visible/strong_open": {
+      "before_cpu_seconds": 0.90625,
+      "after_cpu_seconds": 0.5625,
+      "reduction_percent": 37.9,
+      "audio_sha256": "0d9a6403a4657930123c040f4de1546e673ccf17bd255b4cf685a2de9d18de45",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "48k_hidden/light": {
+      "before_cpu_seconds": 0.53125,
+      "after_cpu_seconds": 0.171875,
+      "reduction_percent": 67.6,
+      "audio_sha256": "7d36ac3eee7be115e1454e542fc5404f80297feae75ee700d6c436b668b203bd",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "48k_hidden/strong": {
+      "before_cpu_seconds": 0.875,
+      "after_cpu_seconds": 0.5625,
+      "reduction_percent": 35.7,
+      "audio_sha256": "0d9a6403a4657930123c040f4de1546e673ccf17bd255b4cf685a2de9d18de45",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "48k_hidden/strong_open": {
+      "before_cpu_seconds": 0.875,
+      "after_cpu_seconds": 0.546875,
+      "reduction_percent": 37.5,
+      "audio_sha256": "0d9a6403a4657930123c040f4de1546e673ccf17bd255b4cf685a2de9d18de45",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "44k1_hidden/light": {
+      "before_cpu_seconds": 1.046875,
+      "after_cpu_seconds": 0.15625,
+      "reduction_percent": 85.1,
+      "audio_sha256": "811a7285277ae7cd703dae21498cf866cbff951befe2c8fe2c3b02f2e0558bc8",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "44k1_hidden/strong": {
+      "before_cpu_seconds": 1.34375,
+      "after_cpu_seconds": 0.59375,
+      "reduction_percent": 55.8,
+      "audio_sha256": "50f4f65a62c7bf44368db2a32384a6cd7d3cc76968942fc2fda26da72a63a6ee",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "44k1_hidden/strong_open": {
+      "before_cpu_seconds": 1.40625,
+      "after_cpu_seconds": 0.578125,
+      "reduction_percent": 58.9,
+      "audio_sha256": "5f294e8b7a6a0c4e7709bc747786a4bd28fb20380247702fdce590fe89afafa3",
+      "monitor_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "recording_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "identical": true
+    },
+    "48k_monitor_record/light": {
+      "before_cpu_seconds": 0.75,
+      "after_cpu_seconds": 0.1875,
+      "reduction_percent": 75.0,
+      "audio_sha256": "7d36ac3eee7be115e1454e542fc5404f80297feae75ee700d6c436b668b203bd",
+      "monitor_sha256": "f01f2ac2fa0c35dec64a479f18a60ba25a0a94e87c420b72e9c3e0700ea4e1de",
+      "recording_sha256": "1b460932e6c5091013a3653ff04fd99b7351342a3f7fdba2a989e3341c183f40",
+      "identical": true
+    },
+    "48k_monitor_record/strong": {
+      "before_cpu_seconds": 1.09375,
+      "after_cpu_seconds": 0.578125,
+      "reduction_percent": 47.1,
+      "audio_sha256": "0d9a6403a4657930123c040f4de1546e673ccf17bd255b4cf685a2de9d18de45",
+      "monitor_sha256": "75def6a708a98355a58452b069119aea21d02bdeabb9823b72056ab7ecc8f450",
+      "recording_sha256": "586eb2a5b840f0a4a507e0c9474449bf0be7d44e471a4fe11554ffb6668da393",
+      "identical": true
+    },
+    "48k_monitor_record/strong_open": {
+      "before_cpu_seconds": 1.09375,
+      "after_cpu_seconds": 0.578125,
+      "reduction_percent": 47.1,
+      "audio_sha256": "0d9a6403a4657930123c040f4de1546e673ccf17bd255b4cf685a2de9d18de45",
+      "monitor_sha256": "75def6a708a98355a58452b069119aea21d02bdeabb9823b72056ab7ecc8f450",
+      "recording_sha256": "586eb2a5b840f0a4a507e0c9474449bf0be7d44e471a4fe11554ffb6668da393",
+      "identical": true
+    }
+  }
+}

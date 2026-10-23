@@ -1,0 +1,17 @@
+{
+  "device_count": 5,
+  "devices": [
+    "CABLE Output (VB-Audio Virtual Cable)",
+    "Line 1 (Virtual Audio Cable)",
+    "Line 2 (Virtual Audio Cable)",
+    "\u0413\u043e\u043b\u043e\u0432\u043d\u043e\u0439 \u0442\u0435\u043b\u0435\u0444\u043e\u043d (2- EarPods)",
+    "CABLE Input (VB-Audio Virtual Cable)"
+  ],
+  "checks_per_repeat": 1000,
+  "repeats": 3,
+  "cpu_ms_per_check": 1.0,
+  "elapsed_ms_per_check": 1.153,
+  "estimated_percent_of_one_logical_cpu_at_1s": 0.1,
+  "estimated_percent_of_one_logical_cpu_at_2s": 0.05,
+  "volume_writes": 0
+}

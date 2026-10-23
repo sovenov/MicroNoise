@@ -1,11 +1,42 @@
+# Python: локальные окружения, кэш и результаты проверок
 __pycache__/
 *.pyc
 *.pyo
-build/
-dist/
-installer_output/
 .venv/
 venv/
-virtual_cables_setup/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 
-# MicroNoise.spec — это конфиг сборки, его держим в репозитории.
+# Готовые сборки, установщики, замеры и промежуточные файлы
+/build/
+/dist/
+/installer_output/
+*.log
+*.obj
+*.o
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Сторонние установщики кабелей хранятся только локально
+/virtual_cables_setup/
+
+# Личные настройки редакторов и локальные секреты
+/.vscode/
+/.idea/
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Служебные файлы ОС
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# MicroNoise.spec, DLL в noiseclean/libs и исходники native/ нужны для сборки.

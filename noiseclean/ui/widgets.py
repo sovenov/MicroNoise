@@ -13,15 +13,18 @@ from . import assets
 C = config.COLORS
 
 
-def round_rect(canvas, x1, y1, x2, y2, r, **kw):
-    """Скруглённый прямоугольник через сглаженный полигон."""
+def _round_rect_points(x1, y1, x2, y2, r):
     r = max(0, min(r, (x2 - x1) / 2, (y2 - y1) / 2))
-    pts = [
+    return [
         x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
         x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
         x1, y2, x1, y2 - r, x1, y1 + r, x1, y1,
     ]
-    return canvas.create_polygon(pts, smooth=True, **kw)
+
+def round_rect(canvas, x1, y1, x2, y2, r, **kw):
+    """Скруглённый прямоугольник через сглаженный полигон."""
+    return canvas.create_polygon(_round_rect_points(x1, y1, x2, y2, r),
+                                 smooth=True, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +190,12 @@ class Meter(tk.Canvas):
         self._kind = kind
         self._h = height
         self._value = 0.0
+        self._track = round_rect(self, 0, 0, 1, height, height / 2,
+                                 fill=C["track"], outline="")
+        self._fill = round_rect(self, 0, 0, 1, height, height / 2,
+                                fill=self._fill_color(0), outline="",
+                                state="hidden")
+        self._render_key = None
         self.bind("<Configure>", lambda e: self._render())
 
     def set_value(self, pct):
@@ -203,16 +212,23 @@ class Meter(tk.Canvas):
         return C["green"] if self._kind == "input" else C["blue"]
 
     def _render(self):
-        self.delete("all")
         w = self.winfo_width()
         h = self._h
         if w <= 1:
             w = 360
-        round_rect(self, 0, 0, w, h, h / 2, fill=C["track"], outline="")
-        fill_w = (self._value / 100.0) * w
+        fill_w = round((self._value / 100.0) * w)
+        color = self._fill_color(self._value)
+        key = (w, fill_w, color)
+        if key == self._render_key:
+            return
+        if self._render_key is None or w != self._render_key[0]:
+            self.coords(self._track, *_round_rect_points(0, 0, w, h, h / 2))
         if fill_w >= 2:
-            round_rect(self, 0, 0, fill_w, h, h / 2,
-                       fill=self._fill_color(self._value), outline="")
+            self.coords(self._fill, *_round_rect_points(0, 0, fill_w, h, h / 2))
+            self.itemconfigure(self._fill, fill=color, state="normal")
+        else:
+            self.itemconfigure(self._fill, state="hidden")
+        self._render_key = key
 
 
 # ---------------------------------------------------------------------------

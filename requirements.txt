@@ -1,6 +1,6 @@
 # MicroNoise — зависимости (Python 3.8.10, Windows)
-# numpy НЕ нужен: весь DSP — на stdlib array + ctypes (см. audio/engine.py,
-# suppressors.py). Это убирает numpy и libopenblas (~40 МБ из сборки).
+# numpy НЕ нужен: буферы stdlib array + ctypes, горячие циклы — dsp_accel.dll.
+# При отсутствии ускорителя работает Python-путь. Без numpy/libopenblas (~40 МБ).
 sounddevice>=0.4.6
 pystray>=0.19      # иконка в системном трее
 pillow>=9.0        # нужен pystray для иконки трея

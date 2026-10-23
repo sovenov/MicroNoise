@@ -23,9 +23,27 @@
 
 1. Установить **Inno Setup 6**.
 2. Собрать программу, чтобы существовала папка `dist\MicroNoise`
-   (`build.bat` в корне репозитория). Внутри неё должна быть папка
-   `virtual_cables_setup\` с подпапками `VB-CABLE_45` и
-   `Virtual_Audio_Cable_VAC_4.71_Lite`.
+   (`build.bat` в корне репозитория).
+3. Отдельно получить дистрибутивы VB-CABLE и Virtual Audio Cable у их
+   разработчиков. Сторонние установщики не хранятся в Git. Распаковать полные
+   комплекты в локальную папку `virtual_cables_setup\` в корне проекта:
+
+   ```text
+   virtual_cables_setup/
+     VB-CABLE_45/                       VBCABLE_Setup_x64.exe, INF/SYS/CAT и остальные файлы
+     Virtual_Audio_Cable_VAC_4.71_Lite/  setup64.exe, x64/, x86/ и остальные файлы
+   ```
+
+   Названия подпапок соответствуют путям в `MicroNoise.iss`. Один EXE без
+   соседних файлов драйвера не подходит. Скопировать комплекты в готовую сборку
+   (команда из корня проекта):
+
+   ```bat
+   xcopy /E /I /Y virtual_cables_setup dist\MicroNoise\virtual_cables_setup
+   ```
+
+   Для текущего скрипта нужны оба комплекта; `build.bat` их не скачивает и
+   не копирует. При другой версии кабелей проверить пути в `MicroNoise.iss`.
 
 ## Сборка установщика
 
@@ -58,3 +76,16 @@ installer\
 - Запускаются 64-битные установщики кабелей (`VBCABLE_Setup_x64.exe`,
   `setup64.exe`), т.к. программа 64-битная.
 - Интерфейс мастера доступен на русском и английском (выбор языка в начале).
+
+## Другая папка сборки
+
+`SourceDir` можно переопределить через ISCC. Укажите абсолютный путь к готовой
+папке приложения с добавленной `virtual_cables_setup`:
+
+```bat
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DSourceDir=C:\path\to\MicroNoise" /FMicroNoiseSetup-latest installer\MicroNoise.iss
+```
+
+Готовые EXE, журналы и промежуточные комплекты остаются локально в игнорируемых
+Git каталогах `installer_output/`, `build/` и `dist/`. Для публикации готовой
+программы используйте GitHub Releases.

@@ -19,7 +19,7 @@ from array import array
 
 import sounddevice as sd
 
-from .. import config
+from .. import config, dsp
 from ..suppressors import (PassthroughSuppressor, RNNoiseSuppressor,
                            SuppressorError, create_suppressor)
 
@@ -34,9 +34,7 @@ def _level_percent(samples):
     n = len(samples)
     if n == 0:
         return 0.0
-    acc = 0.0
-    for v in samples:
-        acc += v * v
+    acc = dsp.sum_squares(samples)
     rms = math.sqrt(acc / n)
     if rms <= 1e-7:
         return 0.0
@@ -47,12 +45,7 @@ def _level_percent(samples):
 
 def _peak_abs(samples):
     """Максимум |x| по кадру (эквивалент float(np.max(np.abs(x))))."""
-    peak = 0.0
-    for v in samples:
-        a = -v if v < 0.0 else v
-        if a > peak:
-            peak = a
-    return peak
+    return dsp.peak_abs(samples)
 
 
 def _to_channels(mono, channels):
@@ -68,7 +61,7 @@ def _to_channels(mono, channels):
 def _mono_from_raw(raw, channels):
     """Сырой interleaved-буфер float32 (из RawInputStream.read) -> моно array('f')."""
     full = array("f")
-    full.frombytes(bytes(raw))
+    full.frombytes(memoryview(raw).cast("B"))
     if channels == 1:
         return full
     return full[0::channels]
@@ -108,12 +101,7 @@ class _LinResampler:
             self._prev = buf[last]
             return array("f")
         out = array("f", bytes(4 * n))
-        for k in range(n):
-            idx = pos + k * step            # pos>=0, step>0 -> idx>=0
-            i0 = int(idx)                   # floor для неотрицательных
-            frac = idx - i0
-            i1 = i0 + 1 if i0 + 1 <= last else last
-            out[k] = buf[i0] * (1.0 - frac) + buf[i1] * frac
+        dsp.resample_into(buf, out, pos, step)
         self._pos = (pos + n * step) - last
         self._prev = buf[last]
         return out
@@ -187,10 +175,10 @@ class AudioEngine:
         self._in_attempts = []  # список вариантов открытия входа
         self._in_pos = 0        # текущий выбранный вариант
 
-        # уровни сигналов (публикуются для UI)
-        self._in_level = 0.0
-        self._out_level = 0.0
-        self._speech = 0.0
+        # Последние кадры для индикаторов. RMS считает только потребитель UI,
+        # а не аудиопоток на каждом кадре. Массивы после публикации не меняются.
+        self._metering_enabled = True
+        self._meter_samples = ((), (), 0.0)
 
         # запись
         self._rec_active = False
@@ -281,7 +269,16 @@ class AudioEngine:
         return self._running
 
     def get_levels(self):
-        return self._in_level, self._out_level, self._speech
+        if not self._metering_enabled:
+            return 0.0, 0.0, 0.0
+        # Одна ссылка на весь снимок: вход и выход берутся из одной итерации.
+        inp, out, speech = self._meter_samples
+        return _level_percent(inp), _level_percent(out), speech
+
+    def set_metering_enabled(self, enabled):
+        """Отключить сбор кадров для UI, не меняя обработку/вывод звука."""
+        self._metering_enabled = bool(enabled)
+        self._meter_samples = ((), (), 0.0)
 
     def current_mode(self):
         with self._lock:
@@ -313,7 +310,7 @@ class AudioEngine:
         if self._suppressor is not None:
             self._suppressor.close()
             self._suppressor = None
-        self._in_level = self._out_level = self._speech = 0.0
+        self._meter_samples = ((), (), 0.0)
 
     def shutdown(self):
         self.stop_playback()
@@ -610,7 +607,6 @@ class AudioEngine:
                     break
 
                 mono = _mono_from_raw(data, self._in_channels)
-                in_level = _level_percent(mono)
 
                 if probe_active:
                     if len(mono):
@@ -646,8 +642,7 @@ class AudioEngine:
                 self._proc_buf.extend(sig)
 
                 out_parts = []
-                out_level = self._out_level
-                last_prob = self._speech
+                meter_out, last_prob = self._meter_samples[1:]
                 while len(self._proc_buf) >= fs:
                     frame = self._proc_buf[:fs]       # array('f') копия кадра
                     del self._proc_buf[:fs]
@@ -655,29 +650,17 @@ class AudioEngine:
                         out, prob = supp.process(frame)
                     except Exception:
                         out, prob = array("f", frame), 0.0
-                    if gain != 1.0:
-                        for i in range(len(out)):
-                            out[i] *= gain
-                    for i in range(len(out)):         # клип в [-1, 1]
-                        v = out[i]
-                        if v > 1.0:
-                            out[i] = 1.0
-                        elif v < -1.0:
-                            out[i] = -1.0
-                    out_level = _level_percent(out)
+                    dsp.gain_clip_in_place(out, gain)
+                    meter_out = out
                     last_prob = prob
                     out_parts.append(out)
 
                     if monitor_on and self._mon_ring is not None:
                         mon = array("f", out)
-                        vol = config.MONITOR_VOLUME
-                        for i in range(len(mon)):
-                            mon[i] *= vol
+                        dsp.scale_in_place(mon, config.MONITOR_VOLUME)
                         self._mon_ring.push(mon)
                     if self._rec_active:
-                        rec = array("h", bytes(2 * len(out)))
-                        for i in range(len(out)):
-                            rec[i] = int(out[i] * 32767.0)
+                        rec = dsp.to_pcm16(out, scale=32767.0)
                         self._rec_frames.append(rec)
                         self._rec_count += len(out)
                         if self._rec_count >= self._rec_target:
@@ -700,13 +683,12 @@ class AudioEngine:
                                 "Ошибка вывода в виртуальный микрофон: %s" % exc)
                             break
 
-                self._in_level = in_level
-                self._out_level = out_level
-                self._speech = last_prob
+                if self._metering_enabled:
+                    self._meter_samples = (mono, meter_out, last_prob)
         finally:
             self._running = False
             self._close_streams()
-            self._in_level = self._out_level = self._speech = 0.0
+            self._meter_samples = ((), (), 0.0)
             self._notify_status("stopped")
 
     # --------------------------------------------------------------- recording

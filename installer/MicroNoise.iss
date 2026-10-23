@@ -19,7 +19,9 @@
 #define AppURL "https://github.com/sovenov"
 #define AppExeName "MicroNoise.exe"
 ; Папка с готовой сборкой (onedir). Относительно расположения этого .iss.
+#ifndef SourceDir
 #define SourceDir "..\dist\MicroNoise"
+#endif
 
 [Setup]
 AppId={{6F2B1E7A-3C4D-4A9E-B1F2-8D6C0A5E9B34}

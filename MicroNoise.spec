@@ -14,7 +14,8 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('noiseclean\\assets', 'assets')]
 binaries = [('noiseclean\\libs\\rnnoise.dll', 'libs'),
-            ('noiseclean\\libs\\libspeexdsp.dll', 'libs')]
+            ('noiseclean\\libs\\libspeexdsp.dll', 'libs'),
+            ('noiseclean\\libs\\dsp_accel.dll', 'libs')]
 hiddenimports = ['pystray._win32']
 
 tmp_ret = collect_all('sounddevice')
