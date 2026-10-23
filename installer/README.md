@@ -1,12 +1,14 @@
 # Установщик MicroNoise (Inno Setup)
 
 Конфиг для [Inno Setup 6](https://jrsoftware.org/isdl.php), который собирает один
-файл `MicroNoiseSetup.exe` из готовой сборки `dist\MicroNoise`.
+файл `MicroNoise Setup.exe` из готовой сборки `dist\MicroNoise`.
 
 ## Что делает установщик
 
 - Ставит программу в `%LOCALAPPDATA%\Programs\MicroNoise` (без прав
   администратора для самой программы).
+- Показывает `MicroNoise 1.2.0` в «Программах и компонентах» Windows;
+  название приложения остаётся `MicroNoise`.
 - Создаёт ярлык в меню **«Пуск»** и, по галочке, на **рабочем столе**.
 - На странице **«Выбор дополнительных задач»** показывает галочки установки
   **виртуального аудиокабеля**:
@@ -57,7 +59,7 @@ installer\build_installer.cmd
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\MicroNoise.iss
 ```
 
-Результат — `installer_output\MicroNoiseSetup.exe`.
+Результат — `installer_output\MicroNoise Setup.exe`.
 
 ## Файлы
 
@@ -83,7 +85,7 @@ installer\
 папке приложения с добавленной `virtual_cables_setup`:
 
 ```bat
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DSourceDir=C:\path\to\MicroNoise" /FMicroNoiseSetup-latest installer\MicroNoise.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DSourceDir=C:\path\to\MicroNoise" installer\MicroNoise.iss
 ```
 
 Готовые EXE, журналы и промежуточные комплекты остаются локально в игнорируемых

@@ -33,7 +33,7 @@ set "EXIT_CODE=%ERRORLEVEL%"
 
 if "%EXIT_CODE%"=="0" (
     echo.
-    echo Установщик собран. Результат: ..\installer_output\MicroNoiseSetup.exe
+    echo Установщик собран. Результат: ..\installer_output\MicroNoise Setup.exe
 ) else (
     echo.
     echo Сборка установщика завершилась с ошибкой, код %EXIT_CODE%.

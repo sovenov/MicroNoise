@@ -2,7 +2,7 @@
 ;  MicroNoise — установщик (Inno Setup 6)
 ;
 ;  Компиляция:  installer\build_installer.cmd   (или ISCC.exe MicroNoise.iss)
-;  Результат:   installer_output\MicroNoiseSetup.exe
+;  Результат:   installer_output\MicroNoise Setup.exe
 ;
 ;  Что делает установщик:
 ;    * ставит готовую сборку из dist\MicroNoise в %LOCALAPPDATA%\Programs\MicroNoise;
@@ -14,7 +14,7 @@
 ; ==========================================================================
 
 #define AppName "MicroNoise"
-#define AppVersion "1.0.0"
+#define AppVersion "1.2.0"
 #define AppPublisher "sovenov"
 #define AppURL "https://github.com/sovenov"
 #define AppExeName "MicroNoise.exe"
@@ -28,6 +28,7 @@ AppId={{6F2B1E7A-3C4D-4A9E-B1F2-8D6C0A5E9B34}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
+UninstallDisplayName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
 AppSupportURL={#AppURL}
@@ -38,7 +39,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\installer_output
-OutputBaseFilename=MicroNoiseSetup
+OutputBaseFilename=MicroNoise Setup
 SetupIconFile=..\noiseclean\assets\app.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 VersionInfoVersion={#AppVersion}
